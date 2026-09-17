@@ -1,0 +1,2314 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>ふわっとタスク</title>
+
+<!-- ============================================
+     PWA対応の基礎設定（ホーム画面に追加してアプリ風に使うための準備）
+     ※ここはメタタグと簡易マニフェストの追加だけです。
+       本格的なオフライン対応（Service Worker）は、
+       このファイル1枚だけでは動かないため含めていません。
+       将来サーバーにホスティングする際に追加してください。
+============================================ -->
+<meta name="theme-color" content="#FBF3EF">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="ふわっとタスク">
+<!-- ホーム画面用アイコン（apple-touch-icon）を用意したら、
+     以下のコメントを外して画像パスを指定してください
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png"> -->
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700;900&display=swap" rel="stylesheet">
+
+<script>
+  // manifest.json を別ファイルで用意しなくても、その場で作って読み込ませる仕組みです
+  (function(){
+    var manifest = {
+      name: 'ふわっとタスク',
+      short_name: 'ふわタスク',
+      start_url: '.',
+      display: 'standalone',
+      background_color: '#FBF3EF',
+      theme_color: '#FBF3EF',
+      // 将来、自分のアイコン画像を用意したら以下のように追加してください
+      // icons: [{ src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png' }]
+      icons: []
+    };
+    var blob = new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' });
+    var link = document.createElement('link');
+    link.rel = 'manifest';
+    link.href = URL.createObjectURL(blob);
+    document.head.appendChild(link);
+  })();
+</script>
+
+<style>
+
+  /* ============================================
+     カラー・フォントなどの基本設定（トークン）
+     ここを書き換えるだけで全体の色味を調整できます
+  ============================================ */
+  :root{
+    --bg: #FBF3EF;               /* 全体の背景：淡いブラッシュアイボリー */
+    --card: #FFFDFB;             /* カードの背景 */
+
+    --mint: #AFD8C9;             /* くすみミント */
+    --mint-light: #DCEFE7;       /* 淡いミント */
+    --mint-deep: #6FA894;        /* 濃いめミント（アクセント） */
+
+    --pink: #EAC3C6;             /* くすみピンク */
+    --pink-light: #FAE6E7;       /* 淡いピンク */
+    --pink-deep: #D9909B;        /* 濃いめピンク（アクセント） */
+
+    --text: #5B4A47;             /* 基本の文字色（黒ではなく暖かいブラウン） */
+    --text-soft: #9A8883;        /* サブテキスト */
+    --line: #EFE1DC;             /* 罫線・区切り線 */
+
+    --shadow: 0 10px 24px rgba(179, 138, 128, 0.12);
+  }
+
+  *{ box-sizing: border-box; }
+
+  body{
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Zen Maru Gothic", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    padding: 32px 24px calc(24px + env(safe-area-inset-bottom));
+  }
+
+  /* ============================================
+     SPA用：ページ切り替え ＆ 下部タブバー
+  ============================================ */
+  main#pages{
+    max-width: 1100px;
+    margin: 0 auto;
+    padding-bottom: 96px; /* 下部タブバーに隠れないための余白 */
+  }
+
+  .page{ display: none; }
+  .page.active{ display: block; }
+
+  .tab-bar{
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+    background: rgba(255, 253, 251, 0.92);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border-top: 1.5px solid var(--line);
+    padding: 8px 6px calc(8px + env(safe-area-inset-bottom));
+    z-index: 50;
+  }
+
+  .tab-btn{
+    border: none;
+    background: transparent;
+    font-size: 22px;
+    line-height: 1;
+    padding: 8px 18px;
+    border-radius: 16px;
+    cursor: pointer;
+    transition: background 0.15s ease, transform 0.1s ease;
+  }
+
+  .tab-btn.active{
+    background: var(--pink-light);
+    transform: translateY(-2px);
+  }
+
+  /* ------------------------------------------------------------
+     絵文字アイコンを、自分で描いたPNG画像などに差し替えたいとき：
+
+     1) 下のHTML（<nav class="tab-bar">...）にある
+        <span class="tab-icon">🗂️</span>
+        を、たとえば以下のように書き換えてください。
+
+        <img class="tab-icon-img" src="icons/matrix.png" alt="マトリクス">
+
+     2) 画像は正方形（例: 48x48px）のPNGがおすすめです。
+        サイズや余白の調整は、下の .tab-icon-img を編集してください。
+  ------------------------------------------------------------ */
+  .tab-icon{
+    display: inline-block;
+  }
+
+  .tab-icon-img{
+    width: 24px;
+    height: 24px;
+    display: block;
+    object-fit: contain;
+  }
+
+  /* ============================================
+     ヘッダー
+  ============================================ */
+  .app-header{
+    max-width: 1100px;
+    margin: 0 auto 32px;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .app-header h1{
+    font-size: 28px;
+    font-weight: 900;
+    margin: 0;
+    letter-spacing: 0.03em;
+  }
+
+  .app-header h1 .accent{
+    color: var(--pink-deep);
+  }
+
+  .app-header .today{
+    font-size: 14px;
+    color: var(--text-soft);
+    font-weight: 500;
+  }
+
+  /* 共通：セクション見出し */
+  .section-title{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 16px;
+    font-weight: 700;
+    margin: 0 0 14px;
+  }
+
+  .section-title .dot{
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  /* ============================================
+     1. 時間管理マトリクス（2×2）
+  ============================================ */
+  .matrix-card{
+    background: var(--card);
+    border-radius: 28px 28px 28px 6px;
+    padding: 22px;
+    box-shadow: var(--shadow);
+  }
+
+  /* マトリクスへの追加フォーム */
+  .matrix-add-row{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 14px;
+  }
+
+  .matrix-add-row select,
+  .matrix-add-row input[type="text"]{
+    border: 1.5px solid var(--line);
+    background: #FFFDFB;
+    border-radius: 12px;
+    padding: 8px 10px;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text);
+    outline: none;
+  }
+
+  .matrix-add-row input[type="text"]{
+    flex: 1 1 120px;
+    min-width: 100px;
+  }
+
+  .matrix-add-row select#matrixTodoSelect{
+    flex: 1 1 130px;
+    max-width: 160px;
+  }
+
+  .matrix-add-row select#matrixQuadrantSelect{
+    max-width: 118px;
+  }
+
+  .matrix-add-row input[type="text"]:focus,
+  .matrix-add-row select:focus{
+    border-color: var(--pink);
+  }
+
+  .matrix-add-row button{
+    border: none;
+    background: var(--pink-deep);
+    color: #fff;
+    font-family: inherit;
+    font-weight: 700;
+    font-size: 12.5px;
+    padding: 0 16px;
+    border-radius: 12px;
+    cursor: pointer;
+  }
+
+  .matrix-grid{
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 14px;
+    aspect-ratio: 1 / 1;
+  }
+
+  .matrix-cell{
+    border-radius: 20px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    overflow: hidden;
+    transition: box-shadow 0.15s ease;
+  }
+
+  .matrix-cell.drag-over{
+    box-shadow: 0 0 0 2.5px var(--pink-deep) inset;
+  }
+
+  .matrix-cell .cell-label{
+    font-size: 13px;
+    font-weight: 700;
+    opacity: 0.85;
+  }
+
+  .matrix-cell .cell-sub{
+    font-size: 11px;
+    font-weight: 500;
+    opacity: 0.6;
+    margin-top: -8px;
+  }
+
+  .matrix-cell ul{
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    overflow-y: auto;
+  }
+
+  .matrix-cell .matrix-empty{
+    font-size: 11px;
+    opacity: 0.5;
+    font-weight: 500;
+    padding: 4px 2px;
+  }
+
+  .matrix-item{
+    background: rgba(255,255,255,0.65);
+    border-radius: 10px;
+    padding: 6px 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: grab;
+  }
+
+  .matrix-item.selected{
+    box-shadow: 0 0 0 2px var(--pink-deep);
+  }
+
+  .matrix-item:active{ cursor: grabbing; }
+
+  .matrix-item-text{
+    flex: 1;
+    font-size: 12.5px;
+    font-weight: 500;
+    line-height: 1.35;
+    word-break: break-word;
+  }
+
+  .matrix-item-move{
+    border: none;
+    background: rgba(255,255,255,0.85);
+    border-radius: 7px;
+    font-family: inherit;
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-soft);
+    padding: 2px 3px;
+    flex-shrink: 0;
+  }
+
+  .matrix-item-del{
+    border: none;
+    background: transparent;
+    color: var(--text-soft);
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 2px;
+    flex-shrink: 0;
+  }
+
+  .matrix-item-del:hover{ color: var(--pink-deep); }
+
+  .cell--do{ background: var(--pink-light); border: 1.5px solid var(--pink); }
+  .cell--do .cell-label{ color: var(--pink-deep); }
+
+  .cell--plan{ background: var(--mint-light); border: 1.5px solid var(--mint); }
+  .cell--plan .cell-label{ color: var(--mint-deep); }
+
+  .cell--delegate{ background: #FBF3EF; border: 1.5px dashed #E3CFC8; }
+  .cell--delegate .cell-label{ color: #B89087; }
+
+  .cell--drop{ background: #F5F1EE; border: 1.5px dashed #DCD3CD; }
+  .cell--drop .cell-label{ color: var(--text-soft); }
+
+  /* 縦横のラベル（緊急/重要 の軸） */
+  .matrix-axis{
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    color: var(--text-soft);
+    font-weight: 500;
+    margin-top: 10px;
+    padding: 0 4px;
+  }
+
+  /* ============================================
+     2. ToDoリスト
+  ============================================ */
+  .todo-card{
+    background: var(--card);
+    border-radius: 28px 28px 6px 28px;
+    padding: 22px;
+    box-shadow: var(--shadow);
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* フォルダタブ */
+  .todo-folders{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 14px;
+  }
+
+  .folder-tab{
+    border: 1.5px solid var(--line);
+    background: #FDFAF8;
+    color: var(--text-soft);
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 6px 13px;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+
+  .folder-tab.active{
+    background: var(--pink-deep);
+    border-color: var(--pink-deep);
+    color: #fff;
+  }
+
+  .folder-tab.add-folder{
+    background: transparent;
+    border-style: dashed;
+    color: var(--mint-deep);
+    border-color: var(--mint);
+  }
+
+  .todo-input-row{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  .todo-input-row input[type="text"]{
+    flex: 1;
+    min-width: 0;
+    border: 1.5px solid var(--line);
+    background: #FFFDFB;
+    border-radius: 14px;
+    padding: 10px 14px;
+    font-family: inherit;
+    font-size: 13.5px;
+    color: var(--text);
+    outline: none;
+  }
+
+  .todo-input-row input[type="text"]:focus{
+    border-color: var(--pink);
+  }
+
+  .todo-input-row select{
+    border: 1.5px solid var(--line);
+    background: #FFFDFB;
+    border-radius: 14px;
+    padding: 0 10px;
+    font-family: inherit;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--text);
+    outline: none;
+    max-width: 92px;
+  }
+
+  .todo-input-row select:focus{
+    border-color: var(--mint);
+  }
+
+  .todo-input-row button{
+    border: none;
+    background: var(--pink-deep);
+    color: #fff;
+    font-family: inherit;
+    font-weight: 700;
+    font-size: 13.5px;
+    padding: 0 18px;
+    border-radius: 14px;
+    cursor: pointer;
+  }
+
+  .todo-empty{
+    text-align: center;
+    color: var(--text-soft);
+    font-size: 12.5px;
+    padding: 18px 0;
+  }
+
+  .todo-list{
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .todo-item{
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 14px;
+    background: #FDFAF8;
+    border: 1px solid var(--line);
+  }
+
+  .todo-checkbox{
+    width: 19px;
+    height: 19px;
+    border-radius: 7px;
+    border: 2px solid var(--mint-deep);
+    flex-shrink: 0;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: #fff;
+  }
+
+  .todo-checkbox.checked{
+    background: var(--mint);
+    border-color: var(--mint);
+  }
+
+  .todo-checkbox.checked::after{
+    content: "✓";
+    color: #fff;
+    font-size: 12px;
+    font-weight: 900;
+  }
+
+  .todo-text{
+    flex: 1;
+    font-size: 13.5px;
+    font-weight: 500;
+  }
+
+  .todo-item.done .todo-text{
+    text-decoration: line-through;
+    color: var(--text-soft);
+  }
+
+  .todo-tag{
+    font-size: 10.5px;
+    font-weight: 700;
+    padding: 3px 9px;
+    border-radius: 999px;
+    color: var(--pink-deep);
+    background: var(--pink-light);
+    white-space: nowrap;
+  }
+
+  .todo-tag.tag-mint{
+    color: var(--mint-deep);
+    background: var(--mint-light);
+  }
+
+  .todo-tag.tag-neutral{
+    color: #B0968E;
+    background: #F3EAE5;
+  }
+
+  .todo-delete{
+    border: none;
+    background: transparent;
+    color: var(--text-soft);
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 2px 4px;
+    flex-shrink: 0;
+  }
+
+  .todo-delete:hover{
+    color: var(--pink-deep);
+  }
+
+  /* ============================================
+     3. 習慣トラッカー（大目標 → 習慣 → 月間ヒートマップ）
+  ============================================ */
+  .habit-card{
+    background: var(--card);
+    border-radius: 28px;
+    padding: 22px;
+    box-shadow: var(--shadow);
+  }
+
+  .habit-header{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .habit-month-label{
+    font-size: 13px;
+    color: var(--text-soft);
+    font-weight: 700;
+  }
+
+  /* 大目標の追加フォーム */
+  .goal-add-row{
+    display: flex;
+    gap: 8px;
+    margin-bottom: 18px;
+  }
+
+  .goal-add-row input[type="text"]{
+    flex: 1;
+    min-width: 0;
+    border: 1.5px solid var(--line);
+    background: #FFFDFB;
+    border-radius: 14px;
+    padding: 10px 14px;
+    font-family: inherit;
+    font-size: 13.5px;
+    color: var(--text);
+    outline: none;
+  }
+
+  .goal-add-row input[type="text"]:focus{ border-color: var(--pink); }
+
+  .goal-add-row button{
+    border: none;
+    background: var(--pink-deep);
+    color: #fff;
+    font-family: inherit;
+    font-weight: 700;
+    font-size: 13px;
+    padding: 0 16px;
+    border-radius: 14px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .goal-list{
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  .goal-empty{
+    text-align: center;
+    color: var(--text-soft);
+    font-size: 12.5px;
+    padding: 20px 0;
+  }
+
+  /* 大目標カード */
+  .goal-card{
+    border-radius: 22px 22px 22px 6px;
+    padding: 16px 18px;
+    background: #FDFAF8;
+    border: 1.5px solid var(--line);
+  }
+
+  .goal-card-header{
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 4px;
+  }
+
+  .goal-title{
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text);
+  }
+
+  .goal-stats{
+    font-size: 11.5px;
+    color: var(--text-soft);
+    font-weight: 500;
+    margin-bottom: 12px;
+  }
+
+  .goal-delete{
+    border: none;
+    background: transparent;
+    color: var(--text-soft);
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  .goal-delete:hover{ color: var(--pink-deep); }
+
+  /* 習慣の追加フォーム */
+  .habit-add-row{
+    display: flex;
+    gap: 6px;
+    margin-bottom: 14px;
+  }
+
+  .habit-add-row input[type="text"]{
+    flex: 1;
+    min-width: 0;
+    border: 1.5px solid var(--line);
+    background: #fff;
+    border-radius: 12px;
+    padding: 7px 12px;
+    font-family: inherit;
+    font-size: 12.5px;
+    color: var(--text);
+    outline: none;
+  }
+
+  .habit-add-row input[type="text"]:focus{ border-color: var(--mint); }
+
+  .habit-add-row button{
+    border: none;
+    background: var(--mint-deep);
+    color: #fff;
+    font-family: inherit;
+    font-weight: 700;
+    font-size: 12px;
+    padding: 0 13px;
+    border-radius: 12px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  /* 習慣ブロックを横に2つ並べるための入れ物 */
+  .habit-blocks{
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  /* 習慣ブロック（1つの習慣＝1つのミニカレンダー）。
+     横に2つ並ぶぶん、内側の余白や文字は少し小さめにしています */
+  .habit-block{
+    background: #fff;
+    border-radius: 14px;
+    padding: 10px;
+    border: 1px solid var(--line);
+    min-width: 0; /* グリッド内でのはみ出し防止 */
+  }
+
+  .habit-block-header{
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 6px;
+    margin-bottom: 4px;
+  }
+
+  .habit-name{
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text);
+    margin-right: auto;
+    word-break: break-word;
+  }
+
+  .habit-stats{
+    font-size: 10px;
+    color: var(--text-soft);
+    font-weight: 500;
+  }
+
+  .habit-mini-btn{
+    border: none;
+    background: var(--mint-light);
+    color: var(--mint-deep);
+    font-family: inherit;
+    font-size: 9.5px;
+    font-weight: 700;
+    padding: 3px 7px;
+    border-radius: 999px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .habit-delete{
+    border: none;
+    background: transparent;
+    color: var(--text-soft);
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 2px;
+  }
+
+  .habit-delete:hover{ color: var(--pink-deep); }
+
+  .habit-level-legend{
+    font-size: 9px;
+    color: var(--text-soft);
+    font-weight: 500;
+    margin-bottom: 6px;
+    line-height: 1.5;
+    word-break: break-word;
+  }
+
+  .habit-level-legend b{
+    color: var(--text);
+    font-weight: 700;
+  }
+
+  /* 月間ヒートマップ（7列グリッド） */
+  .habit-calendar{
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 2.5px;
+  }
+
+  .habit-calendar .weekday{
+    font-size: 8px;
+    font-weight: 700;
+    color: var(--text-soft);
+    text-align: center;
+    padding-bottom: 1px;
+  }
+
+  .habit-day{
+    aspect-ratio: 1 / 1;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 7.5px;
+    font-weight: 600;
+    cursor: pointer;
+    color: var(--text-soft);
+    background: #F1EBE7;
+  }
+
+  .habit-day.empty{ background: transparent; cursor: default; }
+
+  .habit-day.today{ box-shadow: 0 0 0 1.5px var(--pink-deep) inset; }
+
+  /* ミント系（達成レベルが上がるほど濃くなる） */
+  .habit-day.mint-1{ background: var(--mint-light); color: var(--mint-deep); }
+  .habit-day.mint-2{ background: var(--mint); color: #fff; }
+  .habit-day.mint-3{ background: var(--mint-deep); color: #fff; font-weight: 700; }
+
+  /* ピンク系（達成レベルが上がるほど濃くなる） */
+  .habit-day.pink-1{ background: var(--pink-light); color: var(--pink-deep); }
+  .habit-day.pink-2{ background: var(--pink); color: #fff; }
+  .habit-day.pink-3{ background: var(--pink-deep); color: #fff; font-weight: 700; }
+
+  /* ============================================
+     4. カレンダー（記録の集約ビュー）
+  ============================================ */
+  .calendar-card{
+    background: var(--card);
+    border-radius: 28px;
+    padding: 22px;
+    box-shadow: var(--shadow);
+  }
+
+  .cal-grid{
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 5px;
+    margin-top: 16px;
+  }
+
+  .cal-grid .weekday{
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-soft);
+    text-align: center;
+    padding-bottom: 2px;
+  }
+
+  .cal-day{
+    aspect-ratio: 1 / 1;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    color: var(--text-soft);
+    background: #F1EBE7;
+  }
+
+  .cal-day.empty{ background: transparent; cursor: default; }
+  .cal-day.today{ box-shadow: 0 0 0 1.5px var(--mint-deep) inset; }
+  .cal-day.selected{ box-shadow: 0 0 0 2px var(--pink-deep); }
+  .cal-day.today.selected{ box-shadow: 0 0 0 2px var(--pink-deep), 0 0 0 4px var(--mint-deep) inset; }
+
+  .cal-day.cal-1{ background: var(--pink-light); color: var(--pink-deep); }
+  .cal-day.cal-2{ background: var(--pink); color: #fff; }
+  .cal-day.cal-3{ background: var(--pink-deep); color: #fff; font-weight: 700; }
+
+  .cal-detail{
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1.5px dashed var(--line);
+  }
+
+  .cal-detail-empty{
+    font-size: 12.5px;
+    color: var(--text-soft);
+    text-align: center;
+    padding: 10px 0;
+  }
+
+  .cal-detail-day{
+    font-size: 15px;
+    font-weight: 700;
+    margin-bottom: 10px;
+  }
+
+  .cal-detail-row{
+    font-size: 13px;
+    font-weight: 500;
+    margin-bottom: 6px;
+  }
+
+  .cal-detail-tags{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: -2px 0 10px;
+  }
+
+  .cal-detail-logs{
+    background: #FDFAF8;
+    border-radius: 12px;
+    padding: 10px 12px;
+    margin-top: 4px;
+  }
+
+  .cal-detail-log-line{
+    font-size: 12px;
+    color: var(--text-soft);
+    font-weight: 500;
+    line-height: 1.7;
+  }
+
+  /* ============================================
+     5. 時間管理（ポモドーロ／ストップウォッチ）
+  ============================================ */
+  .timer-card{
+    background: var(--card);
+    border-radius: 28px;
+    padding: 22px;
+    box-shadow: var(--shadow);
+  }
+
+  .timer-mode-tabs{
+    display: flex;
+    gap: 6px;
+    margin: 16px 0 14px;
+  }
+
+  .mode-tab{
+    border: 1.5px solid var(--line);
+    background: #FDFAF8;
+    color: var(--text-soft);
+    font-family: inherit;
+    font-size: 12.5px;
+    font-weight: 700;
+    padding: 7px 16px;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+
+  .mode-tab.active{
+    background: var(--pink-deep);
+    border-color: var(--pink-deep);
+    color: #fff;
+  }
+
+  .timer-label-row{ margin-bottom: 14px; }
+
+  .timer-label-row input[type="text"]{
+    width: 100%;
+    border: 1.5px solid var(--line);
+    background: #FFFDFB;
+    border-radius: 14px;
+    padding: 10px 14px;
+    font-family: inherit;
+    font-size: 13.5px;
+    color: var(--text);
+    outline: none;
+  }
+
+  .timer-label-row input[type="text"]:focus{ border-color: var(--pink); }
+
+  .timer-minutes-row{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12.5px;
+    font-weight: 700;
+    color: var(--text-soft);
+    margin-bottom: 10px;
+  }
+
+  .timer-minutes-row input[type="number"]{
+    width: 70px;
+    border: 1.5px solid var(--line);
+    border-radius: 10px;
+    padding: 6px 8px;
+    font-family: inherit;
+    font-size: 13px;
+    color: var(--text);
+  }
+
+  .timer-display{
+    text-align: center;
+    font-size: 48px;
+    font-weight: 900;
+    color: var(--pink-deep);
+    letter-spacing: 0.03em;
+    padding: 20px 0;
+  }
+
+  .timer-controls{
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+  }
+
+  .timer-controls button{
+    border: none;
+    background: var(--mint-deep);
+    color: #fff;
+    font-family: inherit;
+    font-weight: 700;
+    font-size: 12.5px;
+    padding: 10px 16px;
+    border-radius: 14px;
+    cursor: pointer;
+  }
+
+  .timer-controls button.secondary{
+    background: #F1EBE7;
+    color: var(--text-soft);
+  }
+
+  .timer-today{
+    padding-top: 14px;
+    border-top: 1.5px dashed var(--line);
+  }
+
+  .timer-today-title{
+    font-size: 12.5px;
+    font-weight: 700;
+    color: var(--text-soft);
+    margin-bottom: 8px;
+  }
+
+  .timer-log-list{
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  /* ============================================
+     スマホでの表示調整
+     （このアプリはスマホでの利用をメインに想定しています）
+  ============================================ */
+  @media (max-width: 480px){
+    body{
+      padding: 20px 14px calc(20px + env(safe-area-inset-bottom));
+    }
+    .app-header h1{ font-size: 24px; }
+    .matrix-card, .todo-card, .habit-card, .calendar-card, .timer-card{
+      padding: 16px;
+      border-radius: 22px;
+    }
+    .timer-display{ font-size: 38px; }
+    .habit-blocks{ gap: 8px; }
+  }
+
+  @media (max-width: 340px){
+    /* かなり幅の狭い端末では、習慣の2列表示だと文字が潰れやすいため
+       ここだけ1列に戻します */
+    .habit-blocks{ grid-template-columns: 1fr; }
+  }
+
+</style>
+</head>
+<body>
+
+  <!-- ヘッダー -->
+  <header class="app-header">
+    <h1>ふわっと<span class="accent">タスク</span></h1>
+    <div class="today">9月17日（木）の予定</div>
+  </header>
+
+  <main id="pages">
+
+    <!-- ① 時間管理マトリクス -->
+    <section class="page active" data-page="matrix">
+      <section class="matrix-card">
+        <h2 class="section-title">
+          <span class="dot" style="background: var(--pink-deep);"></span>
+          時間管理マトリクス
+        </h2>
+
+        <div class="matrix-add-row">
+          <select id="matrixTodoSelect">
+            <option value="">ToDoから選ぶ</option>
+          </select>
+          <input type="text" id="matrixInput" placeholder="内容を入力...">
+          <select id="matrixQuadrantSelect">
+            <option value="do">今すぐやる</option>
+            <option value="plan">計画してやる</option>
+            <option value="delegate">すきま時間に</option>
+            <option value="drop">やらなくてもいい</option>
+          </select>
+          <button type="button" id="matrixAddBtn">追加</button>
+        </div>
+
+        <div class="matrix-grid" id="matrixGrid">
+          <div class="matrix-cell cell--do" data-quadrant="do">
+            <div class="cell-label">今すぐやる</div>
+            <div class="cell-sub">緊急 × 重要</div>
+            <ul class="matrix-list" data-quadrant="do"></ul>
+          </div>
+
+          <div class="matrix-cell cell--plan" data-quadrant="plan">
+            <div class="cell-label">計画してやる</div>
+            <div class="cell-sub">重要 × 緊急でない</div>
+            <ul class="matrix-list" data-quadrant="plan"></ul>
+          </div>
+
+          <div class="matrix-cell cell--delegate" data-quadrant="delegate">
+            <div class="cell-label">すきま時間に</div>
+            <div class="cell-sub">緊急 × 重要でない</div>
+            <ul class="matrix-list" data-quadrant="delegate"></ul>
+          </div>
+
+          <div class="matrix-cell cell--drop" data-quadrant="drop">
+            <div class="cell-label">やらなくてもいい</div>
+            <div class="cell-sub">緊急でない × 重要でない</div>
+            <ul class="matrix-list" data-quadrant="drop"></ul>
+          </div>
+        </div>
+
+        <div class="matrix-axis">
+          <span>← 緊急でない</span>
+          <span>緊急 →</span>
+        </div>
+      </section>
+    </section>
+
+    <!-- ② ToDoリスト -->
+    <section class="page" data-page="todo">
+      <section class="todo-card">
+        <h2 class="section-title">
+          <span class="dot" style="background: var(--mint-deep);"></span>
+          ToDoリスト
+        </h2>
+
+        <div class="todo-folders" id="folderTabs"></div>
+
+        <div class="todo-input-row">
+          <select id="todoFolderSelect"></select>
+          <input type="text" id="todoInput" placeholder="やることを入力...">
+          <button type="button" id="addTodoBtn">追加</button>
+        </div>
+
+        <ul class="todo-list" id="todoList"></ul>
+      </section>
+    </section>
+
+    <!-- ③ 習慣トラッカー -->
+    <section class="page" data-page="habit">
+      <section class="habit-card">
+        <div class="habit-header">
+          <h2 class="section-title" style="margin:0;">
+            <span class="dot" style="background: var(--pink-deep);"></span>
+            習慣トラッカー
+          </h2>
+          <div class="habit-month-label">2026年9月</div>
+        </div>
+
+        <div class="goal-add-row">
+          <input type="text" id="goalInput" placeholder="大目標を入力（例：〇〇試験合格）">
+          <button type="button" id="goalAddBtn">目標を追加</button>
+        </div>
+
+        <div class="goal-list" id="goalList"></div>
+      </section>
+    </section>
+
+    <!-- ④ カレンダー（記録の集約ビュー） -->
+    <section class="page" data-page="calendar">
+      <section class="calendar-card">
+        <h2 class="section-title">
+          <span class="dot" style="background: var(--mint-deep);"></span>
+          カレンダー
+        </h2>
+        <div class="habit-month-label">2026年9月・ToDo/習慣/作業時間のまとめ</div>
+
+        <div class="cal-grid" id="calGrid"></div>
+
+        <div class="cal-detail" id="calDetail"></div>
+      </section>
+    </section>
+
+    <!-- ⑤ 時間管理（ポモドーロ／ストップウォッチ） -->
+    <section class="page" data-page="timer">
+      <section class="timer-card">
+        <h2 class="section-title">
+          <span class="dot" style="background: var(--pink-deep);"></span>
+          時間管理
+        </h2>
+
+        <div class="timer-mode-tabs">
+          <button type="button" class="mode-tab active" data-mode="pomodoro">ポモドーロ</button>
+          <button type="button" class="mode-tab" data-mode="stopwatch">ストップウォッチ</button>
+        </div>
+
+        <div class="timer-label-row">
+          <input type="text" id="timerLabelInput" placeholder="何をやりますか？（例：勉強）">
+        </div>
+
+        <!-- ポモドーロ -->
+        <div class="timer-panel" id="pomodoroPanel">
+          <div class="timer-minutes-row">
+            <label for="pomodoroMinutesInput">分数：</label>
+            <input type="number" id="pomodoroMinutesInput" min="1" max="180" value="25">
+          </div>
+          <div class="timer-display" id="pomodoroDisplay">25:00</div>
+          <div class="timer-controls">
+            <button type="button" id="pomodoroStartBtn">スタート</button>
+            <button type="button" class="secondary" id="pomodoroPauseBtn">一時停止</button>
+            <button type="button" class="secondary" id="pomodoroResetBtn">リセット</button>
+          </div>
+        </div>
+
+        <!-- ストップウォッチ -->
+        <div class="timer-panel" id="stopwatchPanel" style="display:none;">
+          <div class="timer-display" id="stopwatchDisplay">00:00</div>
+          <div class="timer-controls">
+            <button type="button" id="stopwatchStartBtn">スタート</button>
+            <button type="button" class="secondary" id="stopwatchPauseBtn">一時停止</button>
+            <button type="button" id="stopwatchSaveBtn">記録する</button>
+            <button type="button" class="secondary" id="stopwatchResetBtn">リセット</button>
+          </div>
+        </div>
+
+        <div class="timer-today">
+          <div class="timer-today-title">今日の記録</div>
+          <ul class="timer-log-list" id="timerLogList"></ul>
+        </div>
+      </section>
+    </section>
+
+  </main>
+
+  <!-- 下部タブバー（SPAのページ切り替え） -->
+  <nav class="tab-bar">
+    <button type="button" class="tab-btn active" data-page="matrix" aria-label="時間管理マトリクス">
+      <span class="tab-icon">🗂️</span>
+    </button>
+    <button type="button" class="tab-btn" data-page="todo" aria-label="ToDoリスト">
+      <span class="tab-icon">✅</span>
+    </button>
+    <button type="button" class="tab-btn" data-page="habit" aria-label="習慣トラッカー">
+      <span class="tab-icon">🌱</span>
+    </button>
+    <button type="button" class="tab-btn" data-page="calendar" aria-label="カレンダー">
+      <span class="tab-icon">📅</span>
+    </button>
+    <button type="button" class="tab-btn" data-page="timer" aria-label="時間管理（タイマー）">
+      <span class="tab-icon">⏱️</span>
+    </button>
+  </nav>
+
+  <script>
+    // ============================================
+    // データの保存（localStorage）
+    // ============================================
+    // localStorageはブラウザ（端末）ごとに独立した保存領域なので、
+    // 他の人が同じHTMLファイルを開いても、その人自身の端末・ブラウザの中に
+    // 別々にデータが保存されます（このファイル自体にデータを書き込んだり、
+    // 他の人とデータが混ざったりすることはありません）。
+    var STORAGE_KEY = 'fuwatto-task-app-v1';
+
+    // 保存されている内容があれば読み込み、なければ以下の初期データを使う
+    function saveState(){
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({
+          todos: todos,
+          folders: folders,
+          activeFolder: activeFolder,
+          nextId: nextId,
+          matrixItems: (typeof matrixItems !== 'undefined') ? matrixItems : [],
+          matrixNextId: (typeof matrixNextId !== 'undefined') ? matrixNextId : 1,
+          goals: (typeof goals !== 'undefined') ? goals : [],
+          goalNextId: (typeof goalNextId !== 'undefined') ? goalNextId : 1,
+          habitNextId: (typeof habitNextId !== 'undefined') ? habitNextId : 1,
+          timeLogs: (typeof timeLogs !== 'undefined') ? timeLogs : [],
+          timeLogNextId: (typeof timeLogNextId !== 'undefined') ? timeLogNextId : 1
+        }));
+      } catch(e){
+        console.warn('保存に失敗しました', e);
+      }
+    }
+
+    function loadState(){
+      try {
+        var raw = localStorage.getItem(STORAGE_KEY);
+        if(!raw) return null;
+        return JSON.parse(raw);
+      } catch(e){
+        console.warn('保存データの読み込みに失敗しました', e);
+        return null;
+      }
+    }
+
+    var savedState = loadState();
+
+    // --------------------------------------------
+    // ToDoリスト（フォルダ分け対応）
+    // --------------------------------------------
+
+    // フォルダの一覧。色は 'pink' / 'mint' / 'neutral' を順番に割り当てます
+    var folders = (savedState && savedState.folders) || [
+      { name: '仕事', color: 'pink' },
+      { name: '生活', color: 'mint' },
+      { name: '自分磨き', color: 'mint' }
+    ];
+
+    // ToDoの元データ
+    var todos = (savedState && savedState.todos) || [
+      { id: 1, text: '洗濯物を干す', folder: '生活', done: true },
+      { id: 2, text: '企画書のたたき台を作る', folder: '仕事', done: false },
+      { id: 3, text: '本を1章読む', folder: '自分磨き', done: false },
+      { id: 4, text: '友達に誕生日メッセージを送る', folder: '生活', done: false }
+    ];
+
+    var activeFolder = (savedState && savedState.activeFolder) || 'all'; // 'all' または フォルダ名
+    var nextId = (savedState && typeof savedState.nextId === 'number') ? savedState.nextId : 5;
+
+    var folderTabsEl = document.getElementById('folderTabs');
+    var folderSelectEl = document.getElementById('todoFolderSelect');
+    var todoListEl = document.getElementById('todoList');
+    var todoInputEl = document.getElementById('todoInput');
+
+    function tagClassFor(folderName){
+      var f = folders.find(function(f){ return f.name === folderName; });
+      if(!f) return 'tag-neutral';
+      if(f.color === 'mint') return 'tag-mint';
+      if(f.color === 'neutral') return 'tag-neutral';
+      return '';
+    }
+
+    // フォルダタブと「追加」セレクトの選択肢を描き直す
+    function renderFolderControls(){
+      folderTabsEl.innerHTML = '';
+
+      var allTab = document.createElement('button');
+      allTab.type = 'button';
+      allTab.className = 'folder-tab' + (activeFolder === 'all' ? ' active' : '');
+      allTab.textContent = 'すべて';
+      allTab.addEventListener('click', function(){
+        activeFolder = 'all';
+        renderAll();
+      });
+      folderTabsEl.appendChild(allTab);
+
+      folders.forEach(function(folder){
+        var tab = document.createElement('button');
+        tab.type = 'button';
+        tab.className = 'folder-tab' + (activeFolder === folder.name ? ' active' : '');
+        tab.textContent = folder.name;
+        tab.addEventListener('click', function(){
+          activeFolder = folder.name;
+          renderAll();
+        });
+        folderTabsEl.appendChild(tab);
+      });
+
+      var addTab = document.createElement('button');
+      addTab.type = 'button';
+      addTab.className = 'folder-tab add-folder';
+      addTab.textContent = '＋ フォルダ';
+      addTab.addEventListener('click', addFolder);
+      folderTabsEl.appendChild(addTab);
+
+      // 追加フォームのセレクトボックス
+      var currentSelectValue = folderSelectEl.value;
+      folderSelectEl.innerHTML = '';
+      folders.forEach(function(folder){
+        var opt = document.createElement('option');
+        opt.value = folder.name;
+        opt.textContent = folder.name;
+        folderSelectEl.appendChild(opt);
+      });
+      if(folders.some(function(f){ return f.name === currentSelectValue; })){
+        folderSelectEl.value = currentSelectValue;
+      }
+    }
+
+    // ToDo一覧を描き直す（現在選択中のフォルダで絞り込み）
+    function renderTodoList(){
+      todoListEl.innerHTML = '';
+
+      var visible = todos.filter(function(t){
+        return activeFolder === 'all' || t.folder === activeFolder;
+      });
+
+      if(visible.length === 0){
+        var empty = document.createElement('li');
+        empty.className = 'todo-empty';
+        empty.textContent = 'このフォルダにはまだタスクがありません';
+        todoListEl.appendChild(empty);
+        saveState();
+        return;
+      }
+
+      visible.forEach(function(todo){
+        var li = document.createElement('li');
+        li.className = 'todo-item' + (todo.done ? ' done' : '');
+
+        var checkbox = document.createElement('span');
+        checkbox.className = 'todo-checkbox' + (todo.done ? ' checked' : '');
+        checkbox.addEventListener('click', function(){
+          todo.done = !todo.done;
+          // 完了した「日」を記録しておく（カレンダー画面の集計に使う）
+          todo.completedAt = todo.done ? (TODAY_DAY || 1) : null;
+          renderTodoList();
+          if(typeof renderCalendar === 'function') renderCalendar();
+        });
+
+        var text = document.createElement('span');
+        text.className = 'todo-text';
+        text.textContent = todo.text;
+
+        var tag = document.createElement('span');
+        tag.className = 'todo-tag ' + tagClassFor(todo.folder);
+        tag.textContent = todo.folder;
+
+        var del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'todo-delete';
+        del.textContent = '×';
+        del.addEventListener('click', function(){
+          todos = todos.filter(function(t){ return t.id !== todo.id; });
+          renderTodoList();
+        });
+
+        li.appendChild(checkbox);
+        li.appendChild(text);
+        li.appendChild(tag);
+        li.appendChild(del);
+        todoListEl.appendChild(li);
+      });
+
+      saveState();
+    }
+
+    function renderAll(){
+      renderFolderControls();
+      renderTodoList();
+      renderMatrixTodoOptions();
+    }
+
+    // 「追加」ボタン：入力欄のテキストを、選択中のフォルダでリストに追加
+    function addTodo(){
+      var text = todoInputEl.value.trim();
+      if(text === '') return;
+
+      var folder = folderSelectEl.value || (folders[0] && folders[0].name) || '未分類';
+
+      todos.push({ id: nextId++, text: text, folder: folder, done: false });
+      todoInputEl.value = '';
+
+      // 追加したフォルダが今見えているタブと違っても、そのフォルダに切り替えて確認しやすくする
+      if(activeFolder !== 'all') activeFolder = folder;
+      renderAll();
+      todoInputEl.focus();
+    }
+
+    document.getElementById('addTodoBtn').addEventListener('click', addTodo);
+    todoInputEl.addEventListener('keydown', function(e){
+      if(e.key === 'Enter') addTodo();
+    });
+
+    // 「＋ フォルダ」ボタン：新しいフォルダ名を聞いて追加する
+    function addFolder(){
+      var name = window.prompt('新しいフォルダ名を入力してください');
+      if(!name) return;
+      name = name.trim();
+      if(name === '') return;
+      if(folders.some(function(f){ return f.name === name; })){
+        activeFolder = name;
+        renderAll();
+        return;
+      }
+      var color = folders.length % 2 === 0 ? 'pink' : 'mint';
+      folders.push({ name: name, color: color });
+      activeFolder = name;
+      renderAll();
+    }
+
+    renderAll();
+
+    // --------------------------------------------
+    // 時間管理マトリクス（フォルダをまたいだ移動・追加対応）
+    // --------------------------------------------
+
+    var quadrantLabels = {
+      do: '今すぐやる',
+      plan: '計画してやる',
+      delegate: 'すきま時間に',
+      drop: 'やらなくてもいい'
+    };
+    var quadrantShortLabels = {
+      do: '今すぐ',
+      plan: '計画',
+      delegate: 'すきま',
+      drop: '保留'
+    };
+
+    var matrixItems = (savedState && savedState.matrixItems) || [
+      { id: 1, text: '資料の提出', quadrant: 'do' },
+      { id: 2, text: '返信メール対応', quadrant: 'do' },
+      { id: 3, text: '来月の企画づくり', quadrant: 'plan' },
+      { id: 4, text: '備品の発注', quadrant: 'delegate' },
+      { id: 5, text: 'SNSチェック', quadrant: 'drop' }
+    ];
+    var matrixNextId = (savedState && typeof savedState.matrixNextId === 'number') ? savedState.matrixNextId : 6;
+    var selectedMatrixItemId = null; // クリックで選択中のアイテム（タップ移動用）
+
+    var matrixGridEl = document.getElementById('matrixGrid');
+    var matrixTodoSelectEl = document.getElementById('matrixTodoSelect');
+    var matrixInputEl = document.getElementById('matrixInput');
+    var matrixQuadrantSelectEl = document.getElementById('matrixQuadrantSelect');
+
+    // ToDoリストの内容を、マトリクス追加フォームの選択肢として反映する
+    function renderMatrixTodoOptions(){
+      if(!matrixTodoSelectEl) return;
+      var currentValue = matrixTodoSelectEl.value;
+      matrixTodoSelectEl.innerHTML = '<option value="">ToDoから選ぶ</option>';
+      todos.forEach(function(todo){
+        var opt = document.createElement('option');
+        opt.value = String(todo.id);
+        opt.textContent = todo.text;
+        matrixTodoSelectEl.appendChild(opt);
+      });
+      if(todos.some(function(t){ return String(t.id) === currentValue; })){
+        matrixTodoSelectEl.value = currentValue;
+      }
+    }
+
+    // マス目を描き直す
+    function renderMatrix(){
+      var lists = matrixGridEl.querySelectorAll('.matrix-list');
+
+      lists.forEach(function(listEl){
+        var quadrant = listEl.getAttribute('data-quadrant');
+        listEl.innerHTML = '';
+
+        var items = matrixItems.filter(function(it){ return it.quadrant === quadrant; });
+
+        if(items.length === 0){
+          var empty = document.createElement('div');
+          empty.className = 'matrix-empty';
+          empty.textContent = '（ここに移動できます）';
+          listEl.appendChild(empty);
+          return;
+        }
+
+        items.forEach(function(item){
+          var li = document.createElement('li');
+          li.className = 'matrix-item' + (selectedMatrixItemId === item.id ? ' selected' : '');
+          li.draggable = true;
+          li.setAttribute('data-id', item.id);
+
+          // ドラッグでの移動（PCなど）
+          li.addEventListener('dragstart', function(e){
+            e.dataTransfer.setData('text/plain', String(item.id));
+            e.dataTransfer.effectAllowed = 'move';
+          });
+
+          // タップ／クリックでの移動（1回目で選択 → 移動先のマスをタップ）
+          li.addEventListener('click', function(e){
+            e.stopPropagation();
+            selectedMatrixItemId = (selectedMatrixItemId === item.id) ? null : item.id;
+            renderMatrix();
+          });
+
+          var text = document.createElement('span');
+          text.className = 'matrix-item-text';
+          text.textContent = item.text;
+
+          // セレクトボックスでも直接、移動先を選べるようにする
+          var moveSelect = document.createElement('select');
+          moveSelect.className = 'matrix-item-move';
+          Object.keys(quadrantShortLabels).forEach(function(q){
+            var opt = document.createElement('option');
+            opt.value = q;
+            opt.textContent = quadrantShortLabels[q];
+            if(q === item.quadrant) opt.selected = true;
+            moveSelect.appendChild(opt);
+          });
+          moveSelect.addEventListener('click', function(e){ e.stopPropagation(); });
+          moveSelect.addEventListener('change', function(){
+            item.quadrant = moveSelect.value;
+            selectedMatrixItemId = null;
+            renderMatrix();
+          });
+
+          var del = document.createElement('button');
+          del.type = 'button';
+          del.className = 'matrix-item-del';
+          del.textContent = '×';
+          del.addEventListener('click', function(e){
+            e.stopPropagation();
+            matrixItems = matrixItems.filter(function(it){ return it.id !== item.id; });
+            renderMatrix();
+          });
+
+          li.appendChild(text);
+          li.appendChild(moveSelect);
+          li.appendChild(del);
+          listEl.appendChild(li);
+        });
+      });
+
+      saveState();
+    }
+
+    // ドラッグ＆ドロップ、およびタップ移動の受け皿（4つのマス）
+    matrixGridEl.querySelectorAll('.matrix-cell').forEach(function(cell){
+      var quadrant = cell.getAttribute('data-quadrant');
+
+      cell.addEventListener('dragover', function(e){
+        e.preventDefault();
+        cell.classList.add('drag-over');
+      });
+      cell.addEventListener('dragleave', function(){
+        cell.classList.remove('drag-over');
+      });
+      cell.addEventListener('drop', function(e){
+        e.preventDefault();
+        cell.classList.remove('drag-over');
+        var id = Number(e.dataTransfer.getData('text/plain'));
+        var item = matrixItems.find(function(it){ return it.id === id; });
+        if(item){
+          item.quadrant = quadrant;
+          renderMatrix();
+        }
+      });
+
+      // タップ移動：アイテムを選択した状態でマスをタップすると、そこに移動
+      cell.addEventListener('click', function(){
+        if(selectedMatrixItemId === null) return;
+        var item = matrixItems.find(function(it){ return it.id === selectedMatrixItemId; });
+        if(item){
+          item.quadrant = quadrant;
+          selectedMatrixItemId = null;
+          renderMatrix();
+        }
+      });
+    });
+
+    // 「追加」ボタン：手入力 または ToDoからの選択で、マトリクスに項目を追加
+    document.getElementById('matrixAddBtn').addEventListener('click', function(){
+      var quadrant = matrixQuadrantSelectEl.value;
+      var text = matrixInputEl.value.trim();
+
+      // 手入力が空なら、ToDo選択の内容を使う
+      if(text === '' && matrixTodoSelectEl.value !== ''){
+        var chosenTodo = todos.find(function(t){ return String(t.id) === matrixTodoSelectEl.value; });
+        if(chosenTodo) text = chosenTodo.text;
+      }
+
+      if(text === '') return;
+
+      matrixItems.push({ id: matrixNextId++, text: text, quadrant: quadrant });
+      matrixInputEl.value = '';
+      matrixTodoSelectEl.value = '';
+      renderMatrix();
+    });
+
+    // ToDoを選んだら、手入力欄にも内容を反映して見た目を分かりやすくする
+    matrixTodoSelectEl.addEventListener('change', function(){
+      var chosenTodo = todos.find(function(t){ return String(t.id) === matrixTodoSelectEl.value; });
+      matrixInputEl.value = chosenTodo ? chosenTodo.text : '';
+    });
+
+    matrixInputEl.addEventListener('keydown', function(e){
+      if(e.key === 'Enter') document.getElementById('matrixAddBtn').click();
+    });
+
+    renderMatrixTodoOptions();
+    renderMatrix();
+
+    // --------------------------------------------
+    // 習慣トラッカー（大目標 → 習慣 → 月間ヒートマップ）
+    // --------------------------------------------
+
+    var MONTH_YEAR = 2026;
+    var MONTH_INDEX = 8; // 0始まり：8 = 9月
+    var MONTH_DAYS = new Date(MONTH_YEAR, MONTH_INDEX + 1, 0).getDate();
+    var FIRST_WEEKDAY = new Date(MONTH_YEAR, MONTH_INDEX, 1).getDay(); // 0=日 ... 6=土
+    var LEADING_EMPTY = (FIRST_WEEKDAY + 6) % 7; // 月曜始まりに変換した、月初までの空きマス数
+    var WEEKDAY_LABELS = ['月', '火', '水', '木', '金', '土', '日'];
+
+    var todayNow = new Date();
+    var TODAY_DAY = (todayNow.getFullYear() === MONTH_YEAR && todayNow.getMonth() === MONTH_INDEX)
+      ? todayNow.getDate() : null;
+
+    // 大目標（ゴール）ごとに、複数の習慣を持つ構造
+    var goals = (savedState && savedState.goals) || [
+      {
+        id: 1,
+        title: '健康管理',
+        habits: [
+          {
+            id: 1,
+            name: '読書',
+            color: 'mint',
+            levels: ['数ページ読んだ', '15分読んだ', '30分以上読んだ'],
+            days: { '2': 3, '3': 1, '6': 3, '7': 3, '8': 1, '10': 3, '11': 3, '12': 1, '13': 3, '14': 1, '15': 3, '16': 3 }
+          },
+          {
+            id: 2,
+            name: 'ストレッチ',
+            color: 'pink',
+            levels: ['軽く伸ばした', '10分やった', 'しっかり20分以上'],
+            days: { '3': 2, '8': 1, '12': 2, '14': 1 }
+          }
+        ]
+      }
+    ];
+    var goalNextId = (savedState && typeof savedState.goalNextId === 'number') ? savedState.goalNextId : 2;
+    var habitNextId = (savedState && typeof savedState.habitNextId === 'number') ? savedState.habitNextId : 3;
+
+    var goalListEl = document.getElementById('goalList');
+    var goalInputEl = document.getElementById('goalInput');
+
+    function escapeHtml(str){
+      return String(str == null ? '' : str)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    // レベル1以上を「達成」としてカウントする
+    function computeHabitStats(habit){
+      var achieved = 0;
+      for(var d = 1; d <= MONTH_DAYS; d++){
+        if((habit.days[d] || 0) >= 1) achieved++;
+      }
+      var rate = MONTH_DAYS > 0 ? Math.round((achieved / MONTH_DAYS) * 100) : 0;
+      return { achieved: achieved, total: MONTH_DAYS, rate: rate };
+    }
+
+    // 大目標の達成率は、中の習慣たちの「達成日数の合計 ÷ 対象日数の合計」で算出
+    function computeGoalStats(goal){
+      var achievedSum = 0, totalSum = 0;
+      goal.habits.forEach(function(h){
+        var s = computeHabitStats(h);
+        achievedSum += s.achieved;
+        totalSum += s.total;
+      });
+      var rate = totalSum > 0 ? Math.round((achievedSum / totalSum) * 100) : 0;
+      return { rate: rate, achieved: achievedSum, total: totalSum };
+    }
+
+    // レベル設定（習慣ごとのL1〜L3の説明文）を編集する
+    function editHabitLevels(habit){
+      var l1 = window.prompt('レベル1（薄い色）の内容を入力してください\n例：本を開いた／少しやった', habit.levels[0] || '');
+      if(l1 === null) return;
+      var l2 = window.prompt('レベル2（中間の色）の内容を入力してください\n例：30分やった', habit.levels[1] || '');
+      if(l2 === null) return;
+      var l3 = window.prompt('レベル3（濃い色）の内容を入力してください\n例：ガッツリ1時間以上やった', habit.levels[2] || '');
+      if(l3 === null) return;
+      habit.levels = [l1.trim(), l2.trim(), l3.trim()];
+      renderGoals();
+    }
+
+    // 1つの習慣＝ミニカレンダー（ヒートマップ）を作る
+    function renderHabitBlock(goal, habit){
+      var block = document.createElement('div');
+      block.className = 'habit-block';
+
+      var header = document.createElement('div');
+      header.className = 'habit-block-header';
+
+      var name = document.createElement('div');
+      name.className = 'habit-name';
+      name.textContent = habit.name;
+
+      var stats = computeHabitStats(habit);
+      var statsEl = document.createElement('div');
+      statsEl.className = 'habit-stats';
+      statsEl.textContent = '達成率 ' + stats.rate + '%（' + stats.achieved + '/' + stats.total + '日）';
+
+      var settingsBtn = document.createElement('button');
+      settingsBtn.type = 'button';
+      settingsBtn.className = 'habit-mini-btn';
+      settingsBtn.textContent = 'レベル設定';
+      settingsBtn.addEventListener('click', function(){ editHabitLevels(habit); });
+
+      var del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'habit-delete';
+      del.textContent = '×';
+      del.addEventListener('click', function(){
+        if(!window.confirm('「' + habit.name + '」を削除しますか？')) return;
+        goal.habits = goal.habits.filter(function(h){ return h.id !== habit.id; });
+        renderGoals();
+      });
+
+      header.appendChild(name);
+      header.appendChild(statsEl);
+      header.appendChild(settingsBtn);
+      header.appendChild(del);
+      block.appendChild(header);
+
+      var legend = document.createElement('div');
+      legend.className = 'habit-level-legend';
+      legend.innerHTML =
+        '<b>L1</b>：' + escapeHtml(habit.levels[0]) + '　' +
+        '<b>L2</b>：' + escapeHtml(habit.levels[1]) + '　' +
+        '<b>L3</b>：' + escapeHtml(habit.levels[2]);
+      block.appendChild(legend);
+
+      var calendar = document.createElement('div');
+      calendar.className = 'habit-calendar';
+
+      WEEKDAY_LABELS.forEach(function(label){
+        var wd = document.createElement('div');
+        wd.className = 'weekday';
+        wd.textContent = label;
+        calendar.appendChild(wd);
+      });
+
+      for(var i = 0; i < LEADING_EMPTY; i++){
+        var lead = document.createElement('div');
+        lead.className = 'habit-day empty';
+        calendar.appendChild(lead);
+      }
+
+      var loop = function(day){
+        var level = habit.days[day] || 0;
+        var cell = document.createElement('div');
+        cell.className = 'habit-day'
+          + (level > 0 ? ' ' + habit.color + '-' + level : '')
+          + (day === TODAY_DAY ? ' today' : '');
+        cell.textContent = day;
+        cell.title = level > 0 ? ('レベル' + level + '：' + (habit.levels[level - 1] || '')) : '未達成';
+        cell.addEventListener('click', function(){
+          var next = (habit.days[day] || 0) + 1;
+          if(next > 3) next = 0;
+          if(next === 0) delete habit.days[day];
+          else habit.days[day] = next;
+          renderGoals();
+        });
+        calendar.appendChild(cell);
+      };
+      for(var day = 1; day <= MONTH_DAYS; day++) loop(day);
+
+      block.appendChild(calendar);
+      return block;
+    }
+
+    // 大目標カード（中に習慣ブロックを並べる）を作る
+    function renderGoalCard(goal){
+      var card = document.createElement('div');
+      card.className = 'goal-card';
+
+      var header = document.createElement('div');
+      header.className = 'goal-card-header';
+
+      var title = document.createElement('div');
+      title.className = 'goal-title';
+      title.textContent = goal.title;
+
+      var del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'goal-delete';
+      del.textContent = '×';
+      del.addEventListener('click', function(){
+        if(!window.confirm('「' + goal.title + '」を削除しますか？中の習慣もすべて削除されます')) return;
+        goals = goals.filter(function(g){ return g.id !== goal.id; });
+        renderGoals();
+      });
+
+      header.appendChild(title);
+      header.appendChild(del);
+      card.appendChild(header);
+
+      var statsEl = document.createElement('div');
+      statsEl.className = 'goal-stats';
+      if(goal.habits.length === 0){
+        statsEl.textContent = 'まだ習慣が登録されていません';
+      } else {
+        var stats = computeGoalStats(goal);
+        statsEl.textContent = '今月の達成率 ' + stats.rate + '%（' + stats.achieved + '/' + stats.total + '日分）';
+      }
+      card.appendChild(statsEl);
+
+      var habitAddRow = document.createElement('div');
+      habitAddRow.className = 'habit-add-row';
+      var habitInput = document.createElement('input');
+      habitInput.type = 'text';
+      habitInput.placeholder = '習慣を入力（例：毎日勉強）';
+      var habitAddBtn = document.createElement('button');
+      habitAddBtn.type = 'button';
+      habitAddBtn.textContent = '習慣を追加';
+      habitAddBtn.addEventListener('click', function(){
+        var name = habitInput.value.trim();
+        if(name === '') return;
+        var color = goal.habits.length % 2 === 0 ? 'mint' : 'pink';
+        goal.habits.push({
+          id: habitNextId++,
+          name: name,
+          color: color,
+          levels: ['少しやった', 'まあまあやった', 'しっかりやった'],
+          days: {}
+        });
+        habitInput.value = '';
+        renderGoals();
+      });
+      habitInput.addEventListener('keydown', function(e){ if(e.key === 'Enter') habitAddBtn.click(); });
+      habitAddRow.appendChild(habitInput);
+      habitAddRow.appendChild(habitAddBtn);
+      card.appendChild(habitAddRow);
+
+      var blocksWrap = document.createElement('div');
+      blocksWrap.className = 'habit-blocks';
+      goal.habits.forEach(function(habit){
+        blocksWrap.appendChild(renderHabitBlock(goal, habit));
+      });
+      card.appendChild(blocksWrap);
+
+      return card;
+    }
+
+    function renderGoals(){
+      goalListEl.innerHTML = '';
+
+      if(goals.length === 0){
+        var empty = document.createElement('div');
+        empty.className = 'goal-empty';
+        empty.textContent = 'まだ大目標がありません。上のフォームから追加してください';
+        goalListEl.appendChild(empty);
+      } else {
+        goals.forEach(function(goal){
+          goalListEl.appendChild(renderGoalCard(goal));
+        });
+      }
+
+      saveState();
+    }
+
+    document.getElementById('goalAddBtn').addEventListener('click', function(){
+      var title = goalInputEl.value.trim();
+      if(title === '') return;
+      goals.push({ id: goalNextId++, title: title, habits: [] });
+      goalInputEl.value = '';
+      renderGoals();
+    });
+    goalInputEl.addEventListener('keydown', function(e){
+      if(e.key === 'Enter') document.getElementById('goalAddBtn').click();
+    });
+
+    renderGoals();
+
+    // --------------------------------------------
+    // 時間管理（ポモドーロ／ストップウォッチ）
+    // --------------------------------------------
+
+    var timeLogs = (savedState && savedState.timeLogs) || [];
+    var timeLogNextId = (savedState && typeof savedState.timeLogNextId === 'number') ? savedState.timeLogNextId : 1;
+
+    var timerLabelInputEl = document.getElementById('timerLabelInput');
+
+    function formatMMSS(totalSeconds){
+      var m = Math.floor(totalSeconds / 60);
+      var s = totalSeconds % 60;
+      return (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+    }
+
+    // 記録を保存して、今日のリストとカレンダーに反映する
+    function logTimeSession(minutes, label){
+      var day = TODAY_DAY || 1;
+      timeLogs.push({ id: timeLogNextId++, day: day, minutes: minutes, label: label || '記録' });
+      renderTimerLog();
+      if(typeof renderCalendar === 'function') renderCalendar();
+      saveState();
+    }
+
+    function renderTimerLog(){
+      var listEl = document.getElementById('timerLogList');
+      listEl.innerHTML = '';
+      var day = TODAY_DAY || 1;
+      var todays = timeLogs.filter(function(l){ return l.day === day; });
+
+      if(todays.length === 0){
+        var empty = document.createElement('li');
+        empty.className = 'todo-empty';
+        empty.textContent = 'まだ今日の記録はありません';
+        listEl.appendChild(empty);
+        return;
+      }
+
+      todays.forEach(function(log){
+        var li = document.createElement('li');
+        li.className = 'todo-item';
+
+        var text = document.createElement('span');
+        text.className = 'todo-text';
+        text.textContent = log.label + '（' + log.minutes + '分）';
+
+        var del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'todo-delete';
+        del.textContent = '×';
+        del.addEventListener('click', function(){
+          timeLogs = timeLogs.filter(function(l){ return l.id !== log.id; });
+          renderTimerLog();
+          if(typeof renderCalendar === 'function') renderCalendar();
+          saveState();
+        });
+
+        li.appendChild(text);
+        li.appendChild(del);
+        listEl.appendChild(li);
+      });
+    }
+
+    // ---- ポモドーロ ----
+    var pomodoroMinutesInputEl = document.getElementById('pomodoroMinutesInput');
+    var pomodoroDisplayEl = document.getElementById('pomodoroDisplay');
+    var pomodoroRemainingMs = Number(pomodoroMinutesInputEl.value) * 60 * 1000;
+    var pomodoroTimerId = null;
+    var pomodoroRunning = false;
+    var pomodoroEndAt = null;
+
+    function updatePomodoroDisplay(){
+      var sec = Math.max(0, Math.round(pomodoroRemainingMs / 1000));
+      pomodoroDisplayEl.textContent = formatMMSS(sec);
+    }
+    updatePomodoroDisplay();
+
+    document.getElementById('pomodoroStartBtn').addEventListener('click', function(){
+      if(pomodoroRunning) return;
+      if(pomodoroRemainingMs <= 0){
+        var mins0 = Number(pomodoroMinutesInputEl.value) || 25;
+        pomodoroRemainingMs = mins0 * 60 * 1000;
+      }
+      pomodoroRunning = true;
+      pomodoroEndAt = Date.now() + pomodoroRemainingMs;
+      pomodoroTimerId = setInterval(function(){
+        pomodoroRemainingMs = pomodoroEndAt - Date.now();
+        if(pomodoroRemainingMs <= 0){
+          pomodoroRemainingMs = 0;
+          updatePomodoroDisplay();
+          clearInterval(pomodoroTimerId);
+          pomodoroRunning = false;
+          var mins = Number(pomodoroMinutesInputEl.value) || 25;
+          logTimeSession(mins, timerLabelInputEl.value.trim() || 'ポモドーロ');
+          window.alert('お疲れさまでした！' + mins + '分を記録しました。');
+          return;
+        }
+        updatePomodoroDisplay();
+      }, 250);
+    });
+
+    document.getElementById('pomodoroPauseBtn').addEventListener('click', function(){
+      if(!pomodoroRunning) return;
+      clearInterval(pomodoroTimerId);
+      pomodoroRunning = false;
+      pomodoroRemainingMs = pomodoroEndAt - Date.now();
+    });
+
+    document.getElementById('pomodoroResetBtn').addEventListener('click', function(){
+      clearInterval(pomodoroTimerId);
+      pomodoroRunning = false;
+      var mins = Number(pomodoroMinutesInputEl.value) || 25;
+      pomodoroRemainingMs = mins * 60 * 1000;
+      updatePomodoroDisplay();
+    });
+
+    pomodoroMinutesInputEl.addEventListener('change', function(){
+      if(!pomodoroRunning){
+        var mins = Number(pomodoroMinutesInputEl.value) || 25;
+        pomodoroRemainingMs = mins * 60 * 1000;
+        updatePomodoroDisplay();
+      }
+    });
+
+    // ---- ストップウォッチ ----
+    var stopwatchDisplayEl = document.getElementById('stopwatchDisplay');
+    var stopwatchElapsedMs = 0;
+    var stopwatchTimerId = null;
+    var stopwatchRunning = false;
+    var stopwatchStartedAt = null;
+
+    function updateStopwatchDisplay(){
+      var sec = Math.floor(stopwatchElapsedMs / 1000);
+      stopwatchDisplayEl.textContent = formatMMSS(sec);
+    }
+    updateStopwatchDisplay();
+
+    document.getElementById('stopwatchStartBtn').addEventListener('click', function(){
+      if(stopwatchRunning) return;
+      stopwatchRunning = true;
+      stopwatchStartedAt = Date.now() - stopwatchElapsedMs;
+      stopwatchTimerId = setInterval(function(){
+        stopwatchElapsedMs = Date.now() - stopwatchStartedAt;
+        updateStopwatchDisplay();
+      }, 250);
+    });
+
+    document.getElementById('stopwatchPauseBtn').addEventListener('click', function(){
+      if(!stopwatchRunning) return;
+      clearInterval(stopwatchTimerId);
+      stopwatchRunning = false;
+    });
+
+    document.getElementById('stopwatchResetBtn').addEventListener('click', function(){
+      clearInterval(stopwatchTimerId);
+      stopwatchRunning = false;
+      stopwatchElapsedMs = 0;
+      updateStopwatchDisplay();
+    });
+
+    document.getElementById('stopwatchSaveBtn').addEventListener('click', function(){
+      var mins = Math.round(stopwatchElapsedMs / 60000);
+      if(mins <= 0){
+        window.alert('1分未満のため記録できません。もう少し計測してから記録してください。');
+        return;
+      }
+      clearInterval(stopwatchTimerId);
+      stopwatchRunning = false;
+      logTimeSession(mins, timerLabelInputEl.value.trim() || 'ストップウォッチ');
+      stopwatchElapsedMs = 0;
+      updateStopwatchDisplay();
+    });
+
+    // ---- モード切り替え（ポモドーロ／ストップウォッチ） ----
+    document.querySelectorAll('.mode-tab').forEach(function(tab){
+      tab.addEventListener('click', function(){
+        document.querySelectorAll('.mode-tab').forEach(function(t){ t.classList.remove('active'); });
+        tab.classList.add('active');
+        var mode = tab.getAttribute('data-mode');
+        document.getElementById('pomodoroPanel').style.display = (mode === 'pomodoro') ? '' : 'none';
+        document.getElementById('stopwatchPanel').style.display = (mode === 'stopwatch') ? '' : 'none';
+      });
+    });
+
+    renderTimerLog();
+
+    // --------------------------------------------
+    // カレンダー（ToDo達成率・習慣・作業時間の集約ビュー）
+    // --------------------------------------------
+
+    var selectedCalDay = TODAY_DAY;
+
+    // その日1日分の記録をまとめて計算する
+    function getDayStats(day){
+      var totalTodos = todos.length;
+      var completedTodos = todos.filter(function(t){ return t.completedAt === day; }).length;
+      var todoRate = totalTodos > 0 ? Math.round((completedTodos / totalTodos) * 100) : 0;
+
+      var allHabits = [];
+      goals.forEach(function(g){ g.habits.forEach(function(h){ allHabits.push(h); }); });
+      var totalHabits = allHabits.length;
+      var achievedHabits = allHabits.filter(function(h){ return (h.days[day] || 0) >= 1; });
+
+      var logsForDay = timeLogs.filter(function(l){ return l.day === day; });
+      var totalMinutes = logsForDay.reduce(function(sum, l){ return sum + l.minutes; }, 0);
+
+      return {
+        totalTodos: totalTodos, completedTodos: completedTodos, todoRate: todoRate,
+        totalHabits: totalHabits, achievedHabits: achievedHabits,
+        logs: logsForDay, totalMinutes: totalMinutes
+      };
+    }
+
+    function renderCalendar(){
+      var gridEl = document.getElementById('calGrid');
+      gridEl.innerHTML = '';
+
+      WEEKDAY_LABELS.forEach(function(label){
+        var wd = document.createElement('div');
+        wd.className = 'weekday';
+        wd.textContent = label;
+        gridEl.appendChild(wd);
+      });
+
+      for(var i = 0; i < LEADING_EMPTY; i++){
+        var lead = document.createElement('div');
+        lead.className = 'cal-day empty';
+        gridEl.appendChild(lead);
+      }
+
+      var loop = function(day){
+        var stats = getDayStats(day);
+        var score = (stats.completedTodos > 0 ? 1 : 0) + (stats.achievedHabits.length > 0 ? 1 : 0) + (stats.totalMinutes > 0 ? 1 : 0);
+        var cell = document.createElement('div');
+        cell.className = 'cal-day'
+          + (score > 0 ? ' cal-' + score : '')
+          + (day === TODAY_DAY ? ' today' : '')
+          + (day === selectedCalDay ? ' selected' : '');
+        cell.textContent = day;
+        cell.addEventListener('click', function(){
+          selectedCalDay = day;
+          renderCalendar();
+        });
+        gridEl.appendChild(cell);
+      };
+      for(var day = 1; day <= MONTH_DAYS; day++) loop(day);
+
+      renderCalDetail();
+    }
+
+    function renderCalDetail(){
+      var detailEl = document.getElementById('calDetail');
+      detailEl.innerHTML = '';
+
+      if(selectedCalDay === null){
+        var msg = document.createElement('div');
+        msg.className = 'cal-detail-empty';
+        msg.textContent = '日付をタップすると、その日の記録が見られます';
+        detailEl.appendChild(msg);
+        return;
+      }
+
+      var stats = getDayStats(selectedCalDay);
+
+      var dayTitle = document.createElement('div');
+      dayTitle.className = 'cal-detail-day';
+      dayTitle.textContent = '9月' + selectedCalDay + '日';
+      detailEl.appendChild(dayTitle);
+
+      var todoRow = document.createElement('div');
+      todoRow.className = 'cal-detail-row';
+      todoRow.textContent = stats.totalTodos > 0
+        ? ('✅ ToDo達成率 ' + stats.todoRate + '%（' + stats.completedTodos + '/' + stats.totalTodos + '件）')
+        : '✅ ToDo：登録されたタスクがありません';
+      detailEl.appendChild(todoRow);
+
+      var habitRow = document.createElement('div');
+      habitRow.className = 'cal-detail-row';
+      habitRow.textContent = stats.totalHabits > 0
+        ? ('🌱 習慣 ' + stats.achievedHabits.length + '/' + stats.totalHabits + '件達成')
+        : '🌱 習慣：登録された習慣がありません';
+      detailEl.appendChild(habitRow);
+
+      if(stats.achievedHabits.length > 0){
+        var habitTags = document.createElement('div');
+        habitTags.className = 'cal-detail-tags';
+        stats.achievedHabits.forEach(function(h){
+          var tag = document.createElement('span');
+          tag.className = 'todo-tag ' + (h.color === 'mint' ? 'tag-mint' : '');
+          tag.textContent = h.name;
+          habitTags.appendChild(tag);
+        });
+        detailEl.appendChild(habitTags);
+      }
+
+      var timeRow = document.createElement('div');
+      timeRow.className = 'cal-detail-row';
+      timeRow.textContent = '⏱️ 作業時間 合計 ' + stats.totalMinutes + '分';
+      detailEl.appendChild(timeRow);
+
+      if(stats.logs.length > 0){
+        var logList = document.createElement('div');
+        logList.className = 'cal-detail-logs';
+        stats.logs.forEach(function(l){
+          var line = document.createElement('div');
+          line.className = 'cal-detail-log-line';
+          line.textContent = '・' + l.label + '（' + l.minutes + '分）';
+          logList.appendChild(line);
+        });
+        detailEl.appendChild(logList);
+      }
+    }
+
+    renderCalendar();
+
+    // --------------------------------------------
+    // タブバー（SPAのページ切り替え）
+    // --------------------------------------------
+
+    function switchPage(pageName){
+      document.querySelectorAll('.page').forEach(function(p){
+        p.classList.toggle('active', p.getAttribute('data-page') === pageName);
+      });
+      document.querySelectorAll('.tab-btn').forEach(function(b){
+        b.classList.toggle('active', b.getAttribute('data-page') === pageName);
+      });
+      // カレンダーは他の画面の記録を集約するので、開くたびに最新の内容へ描き直す
+      if(pageName === 'calendar') renderCalendar();
+    }
+
+    document.querySelectorAll('.tab-btn').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        switchPage(btn.getAttribute('data-page'));
+      });
+    });
+  </script>
+
+</body>
+</html>
